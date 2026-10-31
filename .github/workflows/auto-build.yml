@@ -317,15 +317,24 @@ jobs:
           MANIFEST: ${{ needs.prepare.outputs.manifest }}
         run: |
           set -euo pipefail
+          REPO="$GITHUB_REPOSITORY"
           echo "$MANIFEST" | jq . > dist/build-manifest.json
-          if gh release view combined >/dev/null 2>&1; then
-            while IFS= read -r asset; do
-              gh release delete-asset combined "$asset" --yes
-            done < <(gh release view combined --json assets --jq '.assets[].name')
-          else
-            gh release create combined --title "Latest patched APKs" --notes "Latest successfully built and signature-verified APKs for YouTube, Reddit, Google Photos and Instagram. See build-manifest.json for source app and patch versions."
+          if ! gh release view combined --repo "$REPO" >/dev/null 2>&1; then
+            gh release create combined --repo "$REPO" --title "Latest patched APKs" --notes "Latest successfully built and signature-verified APKs for YouTube, Reddit, Google Photos and Instagram. See build-manifest.json for source app and patch versions."
           fi
-          gh release upload combined dist/* --clobber
+
+          # Upload the complete new set before removing stale assets, so a
+          # transient upload failure never leaves the release empty.
+          gh release upload combined --repo "$REPO" dist/* --clobber
+
+          while IFS= read -r asset; do
+            case "$asset" in
+              build-manifest.json) continue ;;
+            esac
+            if ! jq -e --arg file "$asset" '[.[] | .filename, (.filename + ".sha256")] | index($file) != null' <<< "$MANIFEST" >/dev/null; then
+              gh release delete-asset combined "$asset" --repo "$REPO" --yes
+            fi
+          done < <(gh release view combined --repo "$REPO" --json assets --jq '.assets[].name')
 
       - name: Report published assets
         run: gh release view combined --json url,assets --jq '{url,assets:[.assets[].name]}'
