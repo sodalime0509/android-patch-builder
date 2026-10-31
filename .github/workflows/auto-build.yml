@@ -13,8 +13,96 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  prepare:
+    name: Check all app and patch versions
+    runs-on: ubuntu-latest
+    outputs:
+      build: ${{ steps.plan.outputs.build }}
+      manifest: ${{ steps.plan.outputs.manifest }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Resolve versions and compare with combined release
+        id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p tools previous
+          gh release download combined --repo "${GITHUB_REPOSITORY}" --pattern build-manifest.json --dir previous 2>/dev/null || true
+          gh release download --repo MorpheApp/morphe-desktop --pattern '*-all.jar' --dir tools
+          JAR="$(find tools -maxdepth 1 -name '*-all.jar' -print -quit)"
+          test -n "$JAR"
+
+          cat > apps.json <<'JSON'
+          {
+            "youtube": {"package":"com.google.android.youtube","repo":"https://github.com/MorpheApp/morphe-patches"},
+            "reddit": {"package":"com.reddit.frontpage","repo":"https://github.com/MorpheApp/morphe-patches"},
+            "photos": {"package":"com.google.android.apps.photos","repo":"https://github.com/rushiranpise/morphe-patches"},
+            "instagram": {"package":"com.instagram.android","repo":"https://github.com/SysAdminDoc/HushGram"}
+          }
+          JSON
+
+          if [[ -f previous/build-manifest.json ]]; then
+            cp previous/build-manifest.json old-manifest.json
+          else
+            echo '{}' > old-manifest.json
+          fi
+
+          echo '{}' > desired.json
+          while IFS= read -r app; do
+            package="$(jq -r --arg a "$app" '.[$a].package' apps.json)"
+            repo="$(jq -r --arg a "$app" '.[$a].repo' apps.json)"
+            repo_slug="${repo##*/}"
+            repo_owner="${repo#https://github.com/}"
+            compatible="$(java -jar "$JAR" list-versions --patches "$repo" -f "$package")"
+            version="$(printf '%s\n' "$compatible" | grep -Eo '[0-9]+(\.[0-9]+){2,}' | sort -Vu | tail -n1)"
+            test -n "$version"
+            patch_tag="$(gh release list --repo "$repo_owner" --limit 100 --json tagName,isPrerelease,publishedAt --jq '[.[] | select(.isPrerelease == false)] | sort_by(.publishedAt) | last | .tagName')"
+            test -n "$patch_tag"
+            test "$patch_tag" != "null"
+            jq --arg app "$app" --arg version "$version" --arg repo "$repo" --arg slug "$repo_slug" --arg tag "$patch_tag"               '.[$app] = {app_version:$version,patch_repo:$repo,patch_name:$slug,patch_tag:$tag}' desired.json > desired.tmp
+            mv desired.tmp desired.json
+            echo "$app: compatible app version $version; patches $patch_tag"
+          done < <(jq -r 'keys[]' apps.json)
+
+          BUILD=false
+          MANIFEST='{}'
+          for app in youtube reddit photos instagram; do
+            new_version="$(jq -r --arg a "$app" '.[$a].app_version' desired.json)"
+            new_tag="$(jq -r --arg a "$app" '.[$a].patch_tag' desired.json)"
+            old_version="$(jq -r --arg a "$app" '.[$a].app_version // empty' old-manifest.json)"
+            old_tag="$(jq -r --arg a "$app" '.[$a].patch_tag // empty' old-manifest.json)"
+            if [[ "$new_version" != "$old_version" || "$new_tag" != "$old_tag" ]]; then
+              BUILD=true
+            fi
+            # Keep the last successfully published app version unless this app itself has a new compatible version.
+            selected_version="$old_version"
+            if [[ -z "$selected_version" || "$new_version" != "$old_version" ]]; then
+              selected_version="$new_version"
+            fi
+            patch_name="$(jq -r --arg a "$app" '.[$a].patch_name' desired.json)"
+            repo="$(jq -r --arg a "$app" '.[$a].patch_repo' desired.json)"
+            tag="$new_tag"
+            filename="${app}-${patch_name}-${tag}.apk"
+            jq --arg a "$app" --arg version "$selected_version" --arg repo "$repo" --arg patch_name "$patch_name" --arg tag "$tag" --arg filename "$filename"               '.[$a] = {app_version:$version,patch_repo:$repo,patch_name:$patch_name,patch_tag:$tag,filename:$filename}' "$([ -f /dev/null ] && echo /dev/null || echo desired.json)" >/dev/null 2>&1 || true
+            MANIFEST="$(jq -c --arg a "$app" --arg version "$selected_version" --arg repo "$repo" --arg patch_name "$patch_name" --arg tag "$tag" --arg filename "$filename"               '.[$a] = {app_version:$version,patch_repo:$repo,patch_name:$patch_name,patch_tag:$tag,filename:$filename}' <<< "$MANIFEST")"
+          done
+
+          echo "build=$BUILD" >> "$GITHUB_OUTPUT"
+          echo "manifest=$MANIFEST" >> "$GITHUB_OUTPUT"
+          echo "Build all apps: $BUILD"
+          echo "$MANIFEST" | jq .
+
   build:
-    name: Check and build ${{ matrix.name }}
+    name: Build ${{ matrix.name }}
+    needs: prepare
+    if: needs.prepare.outputs.build == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 90
     services:
@@ -29,34 +117,26 @@ jobs:
         include:
           - name: youtube
             package: com.google.android.youtube
-            patch_repo: https://github.com/MorpheApp/morphe-patches
           - name: reddit
             package: com.reddit.frontpage
-            patch_repo: https://github.com/MorpheApp/morphe-patches
           - name: photos
             package: com.google.android.apps.photos
-            patch_repo: https://github.com/rushiranpise/morphe-patches
           - name: instagram
             package: com.instagram.android
-            patch_repo: https://github.com/SysAdminDoc/HushGram
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Set up Java 21
-        uses: actions/setup-java@v4
+      - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '21'
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+      - uses: android-actions/setup-android@v3
         with:
           packages: 'platform-tools build-tools;35.0.0'
 
-      - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@stable
 
       - name: Install multi-source downloader
         run: |
@@ -66,17 +146,14 @@ jobs:
           git clone --depth 1 https://github.com/RookieEnough/Morphe-AutoBuilds.git downloader-upstream
           test -f downloader-upstream/src/downloader.py
           echo "UPSTREAM_DOWNLOADER=$GITHUB_WORKSPACE/downloader-upstream" >> "$GITHUB_ENV"
+
       - name: Wait for FlareSolverr
         run: |
-          set -euo pipefail
           for i in $(seq 1 30); do
-            if curl --fail --silent http://localhost:8192/ >/dev/null; then
-              echo "FlareSolverr is ready."
-              exit 0
-            fi
+            if curl --fail --silent http://localhost:8192/ >/dev/null; then exit 0; fi
             sleep 5
           done
-          echo "::warning::FlareSolverr did not become ready; direct mirror requests will still be attempted."
+          echo "::warning::FlareSolverr did not become ready."
 
       - name: Download latest stable Morphe CLI
         env:
@@ -90,68 +167,36 @@ jobs:
           echo "MORPHE_JAR=$JAR" >> "$GITHUB_ENV"
           java -jar "$JAR" --version
 
-      - name: Resolve latest compatible stable version
-        id: version
+      - name: Load selected app and patch versions
+        id: selected
         env:
-          PATCHES: ${{ matrix.patch_repo }}
-          PACKAGE: ${{ matrix.package }}
-        run: |
-          set -euo pipefail
-          java -jar "$MORPHE_JAR" list-versions --patches "$PATCHES" -f "$PACKAGE" | tee compatible.txt
-          VERSION="$(grep -Eo '[0-9]+(\.[0-9]+){2,}' compatible.txt | sort -Vu | tail -n1)"
-          if [[ -z "$VERSION" ]]; then
-            echo "::error::No compatible stable version found for $PACKAGE"
-            exit 1
-          fi
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-
-      - name: Resolve patch tag and skip existing release
-        id: release
-        env:
-          GH_TOKEN: ${{ github.token }}
-          PATCHES: ${{ matrix.patch_repo }}
+          MANIFEST: ${{ needs.prepare.outputs.manifest }}
           APP: ${{ matrix.name }}
-          VERSION: ${{ steps.version.outputs.version }}
         run: |
           set -euo pipefail
-          PATCH_REPO="${PATCHES#https://github.com/}"
-          PATCH_TAG="$(gh release list --repo "$PATCH_REPO" --limit 100 --json tagName,isPrerelease,publishedAt --jq '[.[] | select(.isPrerelease == false)] | sort_by(.publishedAt) | last | .tagName')"
-          if [[ -z "$PATCH_TAG" || "$PATCH_TAG" == "null" ]]; then
-            echo "::error::No stable patch release found in $PATCH_REPO"
-            exit 1
-          fi
-          TAG="${APP}-v${VERSION}-${PATCH_TAG}"
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-            echo "Already published: $TAG"
-          else
-            echo "skip=false" >> "$GITHUB_OUTPUT"
-            echo "New build required: $TAG"
-          fi
+          echo "version=$(jq -r --arg a "$APP" '.[$a].app_version' <<< "$MANIFEST")" >> "$GITHUB_OUTPUT"
+          echo "patches=$(jq -r --arg a "$APP" '.[$a].patch_repo' <<< "$MANIFEST")" >> "$GITHUB_OUTPUT"
+          echo "filename=$(jq -r --arg a "$APP" '.[$a].filename' <<< "$MANIFEST")" >> "$GITHUB_OUTPUT"
+          echo "patch_tag=$(jq -r --arg a "$APP" '.[$a].patch_tag' <<< "$MANIFEST")" >> "$GITHUB_OUTPUT"
 
       - name: Guard Instagram against Plus or premium unlock patches
         if: matrix.name == 'instagram'
         run: |
           set -euo pipefail
-          curl --fail --silent --show-error --location \
-            https://raw.githubusercontent.com/SysAdminDoc/HushGram/main/patches-list.json \
-            -o hushgram-patches.json
-          jq -r '[.patches[] | select((.name + " " + .description) | test("instagram[ -]?plus|unlock[^.]{0,50}(premium|paid|subscription)|premium[^.]{0,50}(feature|subscription)|subscription[^.]{0,50}(bypass|unlock)"; "i"))] | .[].name' \
-            hushgram-patches.json > blocked-instagram-patches.txt
+          curl --fail --silent --show-error --location https://raw.githubusercontent.com/SysAdminDoc/HushGram/main/patches-list.json -o hushgram-patches.json
+          jq -r '[.patches[] | select((.name + " " + .description) | test("instagram[ -]?plus|unlock[^.]{0,50}(premium|paid|subscription)|premium[^.]{0,50}(feature|subscription)|subscription[^.]{0,50}(bypass|unlock)"; "i"))] | .[].name' hushgram-patches.json > blocked-instagram-patches.txt
           if [[ -s blocked-instagram-patches.txt ]]; then
-            echo "::error::HushGram now contains possible paid-feature unlock patches. Review and update the allowlist before building."
+            echo "::error::HushGram contains possible paid-feature unlock patches."
             cat blocked-instagram-patches.txt
             exit 1
           fi
           echo "No Instagram Plus/premium unlock patches found."
 
-      - name: Download compatible APK using upstream multi-source downloader
-        if: steps.release.outputs.skip != 'true'
+      - name: Download exact compatible APK
         env:
           PACKAGE: ${{ matrix.package }}
           APP: ${{ matrix.name }}
-          VERSION: ${{ steps.version.outputs.version }}
+          VERSION: ${{ steps.selected.outputs.version }}
           GH_TOKEN: ${{ github.token }}
           GITHUB_TOKEN: ${{ github.token }}
           FLARESOLVERR_URL: http://localhost:8192/v1
@@ -159,86 +204,48 @@ jobs:
           set -euo pipefail
           mkdir -p input
           cat > download_exact.py <<'PY'
-          import json
-          import logging
-          import os
-          import sys
+          import json, logging, os, sys
           from pathlib import Path
-
           logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
           workspace = Path.cwd()
           root = Path(os.environ["UPSTREAM_DOWNLOADER"])
           sys.path.insert(0, str(root))
           from src import downloader, apkpure
-
-          # Instagram's APKPure API returns multiple XAPK variants whose split
-          # APKs can have different version codes. Combining those variants
-          # creates an invalid bundle. Keep one complete, internally consistent
-          # XAPK for Instagram; retain upstream multi-variant behavior for others.
           original_apkpure_links = apkpure.get_download_links
           def instagram_single_variant(version, app_name, config):
               links = original_apkpure_links(version, app_name, config)
               if app_name == "instagram" and links:
-                  logging.info(
-                      "Instagram: selecting one complete APKPure XAPK variant "
-                      "to avoid mixing incompatible split version codes."
-                  )
+                  logging.info("Instagram: selecting one complete APKPure XAPK variant.")
                   return links[:1]
               return links
           apkpure.get_download_links = instagram_single_variant
-
-          # The upstream downloader resolves apps/ and downloads relative to its own repo.
           os.chdir(root)
-
-          app = os.environ["APP"]
-          package = os.environ["PACKAGE"]
-          version = os.environ["VERSION"]
+          app, package, version = os.environ["APP"], os.environ["PACKAGE"], os.environ["VERSION"]
           configs = {
-              "youtube": {
-                  "org": "google-inc", "name": "youtube", "type": "APK",
-                  "arch": "universal", "dpi": "nodpi", "package": package, "version": ""
-              },
-              "reddit": {
-                  "org": "redditinc", "name": "reddit", "type": "BUNDLE",
-                  "arch": "universal", "dpi": "120-640dpi", "package": package, "version": ""
-              },
-              "photos": {
-                  "org": "google-inc", "name": "photos", "type": "BUNDLE",
-                  "arch": "universal", "dpi": "120-640dpi", "package": package, "version": ""
-              },
-              "instagram": {
-                  "org": "instagram", "name": "instagram-instagram", "type": "BUNDLE",
-                  "arch": "universal", "dpi": "120-640dpi", "package": package, "version": ""
-              },
+            "youtube":{"org":"google-inc","name":"youtube","type":"APK","arch":"universal","dpi":"nodpi","package":package,"version":""},
+            "reddit":{"org":"redditinc","name":"reddit","type":"BUNDLE","arch":"universal","dpi":"120-640dpi","package":package,"version":""},
+            "photos":{"org":"google-inc","name":"photos","type":"BUNDLE","arch":"universal","dpi":"120-640dpi","package":package,"version":""},
+            "instagram":{"org":"instagram","name":"instagram-instagram","type":"BUNDLE","arch":"universal","dpi":"120-640dpi","package":package,"version":""}
           }
           if app not in configs or configs[app]["package"] != package:
-              raise SystemExit(f"Unknown app/package mapping: {app} / {package}")
-
-          # The reference downloader reads configs from apps/<provider>/<app>.json.
-          # Give each provider the same package identity and version-independent slug metadata.
-          for provider in ("apkmirror", "apkpure", "aptoide", "uptodown", "apkcombo", "apkfab"):
+              raise SystemExit(f"Unknown app/package mapping: {app}/{package}")
+          for provider in ("apkmirror","apkpure","aptoide","uptodown","apkcombo","apkfab"):
               folder = root / "apps" / provider
               folder.mkdir(parents=True, exist_ok=True)
               (folder / f"{app}.json").write_text(json.dumps(configs[app], indent=2))
-
-          providers = ("apkmirror", "apkpure", "aptoide", "uptodown", "apkcombo", "apkfab")
           failures = []
-          for provider in providers:
+          for provider in ("apkmirror","apkpure","aptoide","uptodown","apkcombo","apkfab"):
               logging.info("Attempting %s for %s version %s", provider, package, version)
               try:
-                  result, resolved, candidates = downloader.download_platform(
-                      app, provider, "", "", arch="universal", override_version=version
-                  )
+                  result, resolved, candidates = downloader.download_platform(app, provider, "", "", arch="universal", override_version=version)
                   if result and result.is_file() and result.stat().st_size > 1_000_000:
-                      # The override_version path pins every provider to this exact version.
                       if resolved != version:
                           raise RuntimeError(f"Provider returned {resolved!r}, expected {version!r}")
                       target = workspace / "input" / f"{app}-{version}{result.suffix.lower()}"
                       result.replace(target)
-                      print(f"Downloaded exact version from {provider}: {target}")
-                      print(f"INPUT_APK={target.resolve()}")
                       with open(os.environ["GITHUB_ENV"], "a") as env:
                           env.write(f"INPUT_APK={target.resolve()}\n")
+                      print(f"Downloaded exact version from {provider}: {target}")
                       raise SystemExit(0)
                   failures.append(f"{provider}: no valid file")
               except SystemExit:
@@ -246,19 +253,14 @@ jobs:
               except Exception as exc:
                   logging.exception("%s failed", provider)
                   failures.append(f"{provider}: {type(exc).__name__}: {exc}")
-          print("All providers failed:")
-          for failure in failures:
-              print(" -", failure)
-          raise SystemExit(1)
+          raise SystemExit("All providers failed: " + "; ".join(failures))
           PY
           python download_exact.py
           INPUT_APK="$(sed -n 's/^INPUT_APK=//p' "$GITHUB_ENV" | tail -n1)"
-          test -n "$INPUT_APK"
           test -s "$INPUT_APK"
           file "$INPUT_APK"
 
       - name: Restore persistent signing key
-        if: steps.release.outputs.skip != 'true'
         env:
           KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
         run: |
@@ -269,40 +271,62 @@ jobs:
           test -s signing.jks
 
       - name: Patch, sign and verify
-        if: steps.release.outputs.skip != 'true'
         env:
-          PATCHES: ${{ matrix.patch_repo }}
+          PATCHES: ${{ steps.selected.outputs.patches }}
           KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
           APP: ${{ matrix.name }}
+          OUTPUT_NAME: ${{ steps.selected.outputs.filename }}
         run: |
           set -euo pipefail
           for value in KEYSTORE_PASSWORD KEY_ALIAS KEY_PASSWORD; do
             if [[ -z "${!value}" ]]; then echo "::error::Missing secret $value"; exit 1; fi
           done
-          java -jar "$MORPHE_JAR" patch \
-            --patches "$PATCHES" \
-            --keystore signing.jks \
-            --keystore-password "$KEYSTORE_PASSWORD" \
-            --keystore-entry-alias "$KEY_ALIAS" \
-            --keystore-entry-password "$KEY_PASSWORD" \
-            --out "output/$APP.apk" \
-            "$INPUT_APK"
-          test -s "output/$APP.apk"
-          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose "output/$APP.apk"
-          sha256sum "output/$APP.apk" > "output/$APP-SHA256.txt"
+          java -jar "$MORPHE_JAR" patch --patches "$PATCHES" --keystore signing.jks \
+            --keystore-password "$KEYSTORE_PASSWORD" --keystore-entry-alias "$KEY_ALIAS" \
+            --keystore-entry-password "$KEY_PASSWORD" --out "output/$OUTPUT_NAME" "$INPUT_APK"
+          test -s "output/$OUTPUT_NAME"
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose "output/$OUTPUT_NAME"
+          sha256sum "output/$OUTPUT_NAME" > "output/$OUTPUT_NAME.sha256"
           rm -f signing.jks
 
-      - name: Publish app release
-        if: steps.release.outputs.skip != 'true'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}-apk
+          path: |
+            output/${{ steps.selected.outputs.filename }}
+            output/${{ steps.selected.outputs.filename }}.sha256
+          if-no-files-found: error
+          retention-days: 3
+
+  publish:
+    name: Publish one combined release
+    needs: [prepare, build]
+    if: needs.prepare.outputs.build == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: '*-apk'
+          path: dist
+          merge-multiple: true
+
+      - name: Create or update combined release
         env:
           GH_TOKEN: ${{ github.token }}
-          APP: ${{ matrix.name }}
-          VERSION: ${{ steps.version.outputs.version }}
-          TAG: ${{ steps.release.outputs.tag }}
+          MANIFEST: ${{ needs.prepare.outputs.manifest }}
         run: |
           set -euo pipefail
-          gh release create "$TAG" "output/$APP.apk" "output/$APP-SHA256.txt" \
-            --title "$APP $VERSION patched" \
-            --notes "Automatically built from the latest stable compatible APK and patch release. Signature verified before publication."
+          echo "$MANIFEST" | jq . > dist/build-manifest.json
+          if gh release view combined >/dev/null 2>&1; then
+            while IFS= read -r asset; do
+              gh release delete-asset combined "$asset" --yes
+            done < <(gh release view combined --json assets --jq '.assets[].name')
+          else
+            gh release create combined --title "Latest patched APKs" --notes "Latest successfully built and signature-verified APKs for YouTube, Reddit, Google Photos and Instagram. See build-manifest.json for source app and patch versions."
+          fi
+          gh release upload combined dist/* --clobber
+
+      - name: Report published assets
+        run: gh release view combined --json url,assets --jq '{url,assets:[.assets[].name]}'
