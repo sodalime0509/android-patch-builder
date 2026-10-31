@@ -1,0 +1,208 @@
+name: Build patched APK
+
+on:
+  workflow_dispatch:
+    inputs:
+      app:
+        description: Choose the app to patch
+        required: true
+        type: choice
+        options:
+          - youtube
+          - reddit
+          - photos
+          - instagram
+      apk_url:
+        description: Direct download URL ending in .apk, .apkm, .xapk or .apks
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: patched-apk-${{ inputs.app }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Patch ${{ inputs.app }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android build tools
+        run: sdkmanager "build-tools;35.0.0"
+
+      - name: Validate signing secrets
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for name in KEYSTORE_B64 KEYSTORE_PASSWORD KEY_ALIAS KEY_PASSWORD; do
+            if [[ -z "${!name}" ]]; then
+              echo "::error::Missing required Actions secret: $name"
+              exit 1
+            fi
+          done
+
+      - name: Resolve patch source and package
+        id: target
+        env:
+          APP: ${{ inputs.app }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "$APP" in
+            youtube)
+              echo "patches=https://github.com/MorpheApp/morphe-patches" >> "$GITHUB_OUTPUT"
+              echo "package=com.google.android.youtube" >> "$GITHUB_OUTPUT"
+              ;;
+            reddit)
+              echo "patches=https://github.com/MorpheApp/morphe-patches" >> "$GITHUB_OUTPUT"
+              echo "package=com.reddit.frontpage" >> "$GITHUB_OUTPUT"
+              ;;
+            photos)
+              echo "patches=https://github.com/rushiranpise/morphe-patches" >> "$GITHUB_OUTPUT"
+              echo "package=com.google.android.apps.photos" >> "$GITHUB_OUTPUT"
+              ;;
+            instagram)
+              echo "patches=https://github.com/SysAdminDoc/HushGram" >> "$GITHUB_OUTPUT"
+              echo "package=com.instagram.android" >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              echo "::error::Unsupported app: $APP"
+              exit 1
+              ;;
+          esac
+
+      - name: Download Morphe Desktop stable CLI
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p tools work output
+          gh release download --repo MorpheApp/morphe-desktop --pattern '*-all.jar' --dir tools
+          JAR="$(find tools -maxdepth 1 -type f -name 'morphe-desktop-*-all.jar' -print -quit)"
+          if [[ -z "$JAR" ]]; then
+            echo "::error::Could not find the Morphe Desktop all-in-one JAR in the latest stable release."
+            exit 1
+          fi
+          echo "MORPHE_JAR=$JAR" >> "$GITHUB_ENV"
+          java -jar "$JAR" --version
+
+      - name: Show compatible APK versions
+        env:
+          PATCHES: ${{ steps.target.outputs.patches }}
+          PACKAGE: ${{ steps.target.outputs.package }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "Compatible APK versions reported by $PATCHES for $PACKAGE:"
+          java -jar "$MORPHE_JAR" list-versions --patches "$PATCHES" --filter-package-names "$PACKAGE" | tee output/compatible-versions.txt
+          if [[ ! -s output/compatible-versions.txt ]]; then
+            echo "::error::No compatible APK versions were returned for this app."
+            exit 1
+          fi
+
+      - name: Download clean APK bundle
+        env:
+          APK_URL: ${{ inputs.apk_url }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          url_path="${APK_URL%%\?*}"
+          case "$url_path" in
+            *.apk)  input_file="work/input.apk" ;;
+            *.apkm) input_file="work/input.apkm" ;;
+            *.xapk) input_file="work/input.xapk" ;;
+            *.apks) input_file="work/input.apks" ;;
+            *)
+              echo "::error::URL must end in .apk, .apkm, .xapk or .apks (query parameters are allowed)."
+              exit 1
+              ;;
+          esac
+          curl --fail --location --retry 3 --retry-all-errors --connect-timeout 30 "$APK_URL" --output "$input_file"
+          if ! file "$input_file" | grep -Eqi 'Zip archive|Android package|Java archive'; then
+            echo "::error::Downloaded file is not recognised as an APK/archive. Check that the URL is a direct download."
+            exit 1
+          fi
+          echo "INPUT_APK=$input_file" >> "$GITHUB_ENV"
+          ls -lh "$input_file"
+
+      - name: Restore persistent signing key
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf '%s' "$KEYSTORE_B64" | base64 --decode > work/signing.jks
+          chmod 600 work/signing.jks
+          test -s work/signing.jks
+
+      - name: Patch APK with Morphe
+        env:
+          PATCHES: ${{ steps.target.outputs.patches }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          APP: ${{ inputs.app }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          java -jar "$MORPHE_JAR" patch \
+            --patches "$PATCHES" \
+            --keystore work/signing.jks \
+            --keystore-password "$KEYSTORE_PASSWORD" \
+            --keystore-entry-alias "$KEY_ALIAS" \
+            --keystore-entry-password "$KEY_PASSWORD" \
+            --out "output/${APP}-patched.apk" \
+            --result-file output/patch-result.json \
+            "$INPUT_APK"
+          test -s "output/${APP}-patched.apk"
+          test -s output/patch-result.json
+          jq -e '.success == true' output/patch-result.json >/dev/null
+
+      - name: Verify signature and calculate checksum
+        env:
+          APP: ${{ inputs.app }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose "output/${APP}-patched.apk"
+          sha256sum "output/${APP}-patched.apk" | tee output/SHA256SUMS.txt
+          rm -f work/signing.jks
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          APP: ${{ inputs.app }}
+          RUN_NUMBER: ${{ github.run_number }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="build-${APP}-${RUN_NUMBER}"
+          gh release create "$tag" \
+            "output/${APP}-patched.apk" \
+            output/patch-result.json \
+            output/compatible-versions.txt \
+            output/SHA256SUMS.txt \
+            --title "${APP} patched build #${RUN_NUMBER}" \
+            --notes "Personal build from the selected patch source. Check the compatible-versions.txt and patch-result.json assets. Verify SHA256SUMS.txt before installation."
