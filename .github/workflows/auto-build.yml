@@ -337,4 +337,6 @@ jobs:
           done < <(gh release view combined --repo "$REPO" --json assets --jq '.assets[].name')
 
       - name: Report published assets
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: gh release view combined --repo "$GITHUB_REPOSITORY" --json url,assets --jq '{url,assets:[.assets[].name]}'
