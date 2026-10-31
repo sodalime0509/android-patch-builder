@@ -18,7 +18,7 @@ The repository now has a second workflow: **Automatic patched APK updates** (`.g
 
 The apkeep downloader does **not** support APKMirror. The current automated workflow therefore uses APKPure (apkeep's supported provider). APKMirror scraping/API integration is not included yet. If APKPure cannot provide the exact compatible version, that app's job fails safely rather than silently building a different version.
 
-Split APK bundles are not merged by this first automatic workflow. If a source returns only a split bundle instead of a single APK, the job will fail rather than publish an incomplete package.
+Morphe CLI natively accepts `.apkm`, `.xapk` and `.apks` split bundles and merges them before patching. The downloader now passes these formats directly to Morphe, alongside ordinary `.apk` files. If APKPure returns no usable package for the exact compatible version, the job fails safely rather than silently building a different version.
 
 ### Obtainium
 
