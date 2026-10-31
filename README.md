@@ -58,6 +58,8 @@ Never commit or share the keystore or these secret values.
 - Google Photos: https://github.com/rushiranpise/morphe-patches
 - Instagram: https://github.com/SysAdminDoc/HushGram
 
+For Instagram, the automatic workflow also checks HushGram's published patch list before building. It stops if a patch description appears to add Instagram Plus, premium-feature unlocking, or subscription bypass functionality. Ordinary HushGram patches (privacy, ads, interface, downloads and playback) remain available. This is a fail-closed keyword guard, not a manual review of every upstream code change.
+
 Morphe Desktop CLI documentation: https://github.com/MorpheApp/morphe-desktop/blob/main/docs/documentation.md
 
 ## Important limitations and safety
