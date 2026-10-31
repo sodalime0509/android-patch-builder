@@ -110,6 +110,22 @@ jobs:
             echo "New build required: $TAG"
           fi
 
+      - name: Guard Instagram against Plus or premium unlock patches
+        if: matrix.name == 'instagram'
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --location \
+            https://raw.githubusercontent.com/SysAdminDoc/HushGram/main/patches-list.json \
+            -o hushgram-patches.json
+          jq -r '[.patches[] | select((.name + " " + .description) | test("instagram[ -]?plus|unlock[^.]{0,50}(premium|paid|subscription)|premium[^.]{0,50}(feature|subscription)|subscription[^.]{0,50}(bypass|unlock)"; "i"))] | .[].name' \
+            hushgram-patches.json > blocked-instagram-patches.txt
+          if [[ -s blocked-instagram-patches.txt ]]; then
+            echo "::error::HushGram now contains possible paid-feature unlock patches. Review and update the allowlist before building."
+            cat blocked-instagram-patches.txt
+            exit 1
+          fi
+          echo "No Instagram Plus/premium unlock patches found."
+
       - name: Download compatible APK from APKPure
         if: steps.release.outputs.skip != 'true'
         env:
