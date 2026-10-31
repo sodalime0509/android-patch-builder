@@ -14,7 +14,7 @@ concurrency:
 
 jobs:
   build:
-    name: Check and build \${{ matrix.name }}
+    name: Check and build ${{ matrix.name }}
     runs-on: ubuntu-latest
     timeout-minutes: 90
     strategy:
@@ -49,6 +49,9 @@ jobs:
         with:
           packages: 'platform-tools build-tools;35.0.0'
 
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
       - name: Install APK downloader
         run: |
           set -euo pipefail
@@ -57,7 +60,7 @@ jobs:
 
       - name: Download latest stable Morphe CLI
         env:
-          GH_TOKEN: \${{ github.token }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           mkdir -p tools input output
@@ -70,8 +73,8 @@ jobs:
       - name: Resolve latest compatible stable version
         id: version
         env:
-          PATCHES: \${{ matrix.patch_repo }}
-          PACKAGE: \${{ matrix.package }}
+          PATCHES: ${{ matrix.patch_repo }}
+          PACKAGE: ${{ matrix.package }}
         run: |
           set -euo pipefail
           java -jar "$MORPHE_JAR" list-versions --patches "$PATCHES" -f "$PACKAGE" | tee compatible.txt
@@ -85,10 +88,10 @@ jobs:
       - name: Resolve patch tag and skip existing release
         id: release
         env:
-          GH_TOKEN: \${{ github.token }}
-          PATCHES: \${{ matrix.patch_repo }}
-          APP: \${{ matrix.name }}
-          VERSION: \${{ steps.version.outputs.version }}
+          GH_TOKEN: ${{ github.token }}
+          PATCHES: ${{ matrix.patch_repo }}
+          APP: ${{ matrix.name }}
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
           set -euo pipefail
           PATCH_REPO="\${PATCHES#https://github.com/}"
@@ -110,8 +113,8 @@ jobs:
       - name: Download compatible APK (APKMirror then APKPure)
         if: steps.release.outputs.skip != 'true'
         env:
-          PACKAGE: \${{ matrix.package }}
-          VERSION: \${{ steps.version.outputs.version }}
+          PACKAGE: ${{ matrix.package }}
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
           set -euo pipefail
           mkdir -p input
@@ -132,7 +135,7 @@ jobs:
       - name: Restore persistent signing key
         if: steps.release.outputs.skip != 'true'
         env:
-          KEYSTORE_B64: \${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
         run: |
           set -euo pipefail
           test -n "$KEYSTORE_B64"
@@ -143,11 +146,11 @@ jobs:
       - name: Patch, sign and verify
         if: steps.release.outputs.skip != 'true'
         env:
-          PATCHES: \${{ matrix.patch_repo }}
-          KEYSTORE_PASSWORD: \${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          KEY_ALIAS: \${{ secrets.ANDROID_KEY_ALIAS }}
-          KEY_PASSWORD: \${{ secrets.ANDROID_KEY_PASSWORD }}
-          APP: \${{ matrix.name }}
+          PATCHES: ${{ matrix.patch_repo }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          APP: ${{ matrix.name }}
         run: |
           set -euo pipefail
           for value in KEYSTORE_PASSWORD KEY_ALIAS KEY_PASSWORD; do
@@ -169,10 +172,10 @@ jobs:
       - name: Publish app release
         if: steps.release.outputs.skip != 'true'
         env:
-          GH_TOKEN: \${{ github.token }}
-          APP: \${{ matrix.name }}
-          VERSION: \${{ steps.version.outputs.version }}
-          TAG: \${{ steps.release.outputs.tag }}
+          GH_TOKEN: ${{ github.token }}
+          APP: ${{ matrix.name }}
+          VERSION: ${{ steps.version.outputs.version }}
+          TAG: ${{ steps.release.outputs.tag }}
         run: |
           set -euo pipefail
           gh release create "$TAG" "output/$APP.apk" "output/$APP-SHA256.txt" \
