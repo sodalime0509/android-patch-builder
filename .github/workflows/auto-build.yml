@@ -17,6 +17,12 @@ jobs:
     name: Check and build ${{ matrix.name }}
     runs-on: ubuntu-latest
     timeout-minutes: 90
+    services:
+      flaresolverr:
+        image: ghcr.io/flaresolverr/flaresolverr:latest
+        ports:
+          - 8192:8191
+        options: --shm-size=1gb
     strategy:
       fail-fast: false
       matrix:
@@ -52,11 +58,25 @@ jobs:
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Install APK downloader
+      - name: Install multi-source downloader
         run: |
           set -euo pipefail
-          cargo install apkeep --locked
-          apkeep --version
+          python -m pip install --upgrade pip
+          python -m pip install PyGithub beautifulsoup4 curl-cffi requests
+          git clone --depth 1 https://github.com/RookieEnough/Morphe-AutoBuilds.git downloader-upstream
+          test -f downloader-upstream/src/downloader.py
+          echo "UPSTREAM_DOWNLOADER=$GITHUB_WORKSPACE/downloader-upstream" >> "$GITHUB_ENV"
+      - name: Wait for FlareSolverr
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 30); do
+            if curl --fail --silent http://localhost:8192/ >/dev/null; then
+              echo "FlareSolverr is ready."
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "::warning::FlareSolverr did not become ready; direct mirror requests will still be attempted."
 
       - name: Download latest stable Morphe CLI
         env:
@@ -126,54 +146,94 @@ jobs:
           fi
           echo "No Instagram Plus/premium unlock patches found."
 
-      - name: Download compatible APK using multiple sources
+      - name: Download compatible APK using upstream multi-source downloader
         if: steps.release.outputs.skip != 'true'
         env:
           PACKAGE: ${{ matrix.package }}
+          APP: ${{ matrix.name }}
           VERSION: ${{ steps.version.outputs.version }}
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_TOKEN: ${{ github.token }}
+          FLARESOLVERR_URL: http://localhost:8192/v1
         run: |
           set -euo pipefail
           mkdir -p input
-          # Try independent apkeep providers in order. Every request is pinned
-          # to Morphe's compatible version; never silently substitute latest.
-          # APKPure is first because it already produced the working Reddit XAPK.
-          # apkeep currently exposes APKPure as its only compatible third-party source.\n          # Keep this list explicit so unsupported provider names are never tried.\n          PROVIDERS=(apk-pure)
-          FOUND=""
-          for PROVIDER in "${PROVIDERS[@]}"; do
-            echo "::group::Trying ${PROVIDER} for ${PACKAGE}@${VERSION}"
-            DEST="input/${PROVIDER}"
-            mkdir -p "$DEST"
-            if [[ "$PROVIDER" == "apk-pure" ]]; then
-              apkeep -a "$PACKAGE@$VERSION" -d "$PROVIDER" -o 'acknowledge_dangers=true' "$DEST" || true
-            else
-              apkeep -a "$PACKAGE@$VERSION" -d "$PROVIDER" "$DEST" || true
-            fi
-            CANDIDATE="$(find "$DEST" -type f \\( -iname '*.apk' -o -iname '*.xapk' -o -iname '*.apkm' -o -iname '*.apks' \\) -size +1M -print -quit)"
-            if [[ -n "$CANDIDATE" && "$CANDIDATE" == *.apk ]]; then
-              BADGING="$("$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$CANDIDATE" 2>/dev/null || true)"
-              GOT_PACKAGE="$(printf '%s\\n' "$BADGING" | sed -n "s/^package: name='\\([^']*\\)'.*/\\1/p" | head -n1)"
-              GOT_VERSION="$(printf '%s\\n' "$BADGING" | sed -n "s/^package:.* versionName='\\([^']*\\)'.*/\\1/p" | head -n1)"
-              if [[ "$GOT_PACKAGE" != "$PACKAGE" || "$GOT_VERSION" != "$VERSION" ]]; then
-                echo "Rejecting mismatched APK: package=$GOT_PACKAGE version=$GOT_VERSION"
-                CANDIDATE=""
-              fi
-            fi
-            if [[ -n "$CANDIDATE" ]]; then
-              FOUND="$CANDIDATE"
-              echo "Provider succeeded: $PROVIDER"
-              break
-            fi
-            echo "Provider did not return a usable exact-version package."
-            echo "::endgroup::"
-          done
-          if [[ -z "$FOUND" ]]; then
-            echo "::error::APKPure did not return a usable exact-version package for $PACKAGE@$VERSION."
-            find input -type f -ls || true
-            exit 1
-          fi
-          echo "INPUT_APK=$FOUND" >> "$GITHUB_ENV"
-          echo "Selected package: $FOUND"
-          file "$FOUND"
+          cat > download_exact.py <<'PY'
+          import json
+          import logging
+          import os
+          import sys
+          from pathlib import Path
+
+          logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+          root = Path(os.environ["UPSTREAM_DOWNLOADER"])
+          sys.path.insert(0, str(root))
+          from src import downloader
+
+          app = os.environ["APP"]
+          package = os.environ["PACKAGE"]
+          version = os.environ["VERSION"]
+          configs = {
+              "youtube": {
+                  "org": "google-inc", "name": "youtube", "type": "APK",
+                  "arch": "universal", "dpi": "nodpi", "package": package, "version": ""
+              },
+              "reddit": {
+                  "org": "redditinc", "name": "reddit", "type": "BUNDLE",
+                  "arch": "universal", "dpi": "120-640dpi", "package": package, "version": ""
+              },
+              "photos": {
+                  "org": "google-inc", "name": "photos", "type": "BUNDLE",
+                  "arch": "universal", "dpi": "120-640dpi", "package": package, "version": ""
+              },
+              "instagram": {
+                  "org": "instagram", "name": "instagram-instagram", "type": "BUNDLE",
+                  "arch": "universal", "dpi": "120-640dpi", "package": package, "version": ""
+              },
+          }
+          if app not in configs or configs[app]["package"] != package:
+              raise SystemExit(f"Unknown app/package mapping: {app} / {package}")
+
+          # The reference downloader reads configs from apps/<provider>/<app>.json.
+          # Give each provider the same package identity and version-independent slug metadata.
+          for provider in ("apkmirror", "apkpure", "aptoide", "uptodown", "apkcombo", "apkfab"):
+              folder = root / "apps" / provider
+              folder.mkdir(parents=True, exist_ok=True)
+              (folder / f"{app}.json").write_text(json.dumps(configs[app], indent=2))
+
+          providers = ("apkmirror", "apkpure", "aptoide", "uptodown", "apkcombo", "apkfab")
+          failures = []
+          for provider in providers:
+              logging.info("Attempting %s for %s version %s", provider, package, version)
+              try:
+                  result, resolved, candidates = downloader.download_platform(
+                      app, provider, "", "", arch="universal", override_version=version
+                  )
+                  if result and result.is_file() and result.stat().st_size > 1_000_000:
+                      # The override_version path pins every provider to this exact version.
+                      if resolved != version:
+                          raise RuntimeError(f"Provider returned {resolved!r}, expected {version!r}")
+                      target = Path("input") / f"{app}-{version}{result.suffix.lower()}"
+                      result.replace(target)
+                      print(f"Downloaded exact version from {provider}: {target}")
+                      print(f"INPUT_APK={target.resolve()}")
+                      with open(os.environ["GITHUB_ENV"], "a") as env:
+                          env.write(f"INPUT_APK={target.resolve()}\\n")
+                      raise SystemExit(0)
+                  failures.append(f"{provider}: no valid file")
+              except SystemExit:
+                  raise
+              except Exception as exc:
+                  logging.exception("%s failed", provider)
+                  failures.append(f"{provider}: {type(exc).__name__}: {exc}")
+          print("All providers failed:")
+          for failure in failures:
+              print(" -", failure)
+          raise SystemExit(1)
+          PY
+          python download_exact.py
+          test -s "$INPUT_APK"
+          file "$INPUT_APK"
 
       - name: Restore persistent signing key
         if: steps.release.outputs.skip != 'true'
