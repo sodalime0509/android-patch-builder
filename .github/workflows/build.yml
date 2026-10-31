@@ -180,8 +180,8 @@ jobs:
         run: |
           set -euo pipefail
           echo "Restored keystore size: $(stat -c '%s bytes' work/signing.jks)"
-          keytool -list -keystore work/signing.jks -storepass "$KEYSTORE_PASSWORD" -alias "$KEY_ALIAS" >/dev/null
-          echo "Keystore is readable and contains the configured alias."
+          echo "Configured key alias: $KEY_ALIAS"
+          keytool -list -keystore work/signing.jks -storepass "$KEYSTORE_PASSWORD"
 
       - name: Patch APK with Morphe
         env:
