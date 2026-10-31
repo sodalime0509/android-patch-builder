@@ -172,6 +172,17 @@ jobs:
           chmod 600 work/signing.jks
           test -s work/signing.jks
 
+      - name: Verify restored signing keystore
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "Restored keystore size: $(stat -c '%s bytes' work/signing.jks)"
+          keytool -list -keystore work/signing.jks -storepass "$KEYSTORE_PASSWORD" -alias "$KEY_ALIAS" >/dev/null
+          echo "Keystore is readable and contains the configured alias."
+
       - name: Patch APK with Morphe
         env:
           PATCHES: ${{ steps.target.outputs.patches }}
