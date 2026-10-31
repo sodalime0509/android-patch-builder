@@ -136,7 +136,8 @@ jobs:
           mkdir -p input
           # apkeep supports APKPure but does not implement an APKMirror provider.
           # Pin the exact version selected by Morphe's compatibility list.
-          apkeep -a "$PACKAGE@$VERSION" -d apk-pure input
+          # Explicitly acknowledge apkeep's APKPure source warning; only accept the exact pinned version.
+          apkeep -a "$PACKAGE@$VERSION" -d apk-pure -o 'acknowledge_dangers=true' input
           APK="$(find input -type f -name '*.apk' -size +1M -print -quit)"
           if [[ -z "$APK" ]]; then
             echo "::error::No APK downloaded. Split bundles require a separate merge step."
