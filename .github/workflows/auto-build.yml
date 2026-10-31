@@ -90,7 +90,6 @@ jobs:
             repo="$(jq -r --arg a "$app" '.[$a].patch_repo' desired.json)"
             tag="$new_tag"
             filename="${app}-${patch_name}-${tag}.apk"
-            jq --arg a "$app" --arg version "$selected_version" --arg repo "$repo" --arg patch_name "$patch_name" --arg tag "$tag" --arg filename "$filename"               '.[$a] = {app_version:$version,patch_repo:$repo,patch_name:$patch_name,patch_tag:$tag,filename:$filename}' "$([ -f /dev/null ] && echo /dev/null || echo desired.json)" >/dev/null 2>&1 || true
             MANIFEST="$(jq -c --arg a "$app" --arg version "$selected_version" --arg repo "$repo" --arg patch_name "$patch_name" --arg tag "$tag" --arg filename "$filename"               '.[$a] = {app_version:$version,patch_repo:$repo,patch_name:$patch_name,patch_tag:$tag,filename:$filename}' <<< "$MANIFEST")"
           done
 
