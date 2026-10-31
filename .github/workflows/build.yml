@@ -180,6 +180,8 @@ jobs:
         run: |
           set -euo pipefail
           echo "Restored keystore size: $(stat -c '%s bytes' work/signing.jks)"
+          echo "Restored keystore SHA-256:"
+          sha256sum work/signing.jks
           echo "Configured key alias: $KEY_ALIAS"
           keytool -list -keystore work/signing.jks -storepass "$KEYSTORE_PASSWORD"
 
