@@ -126,7 +126,7 @@ jobs:
           fi
           echo "No Instagram Plus/premium unlock patches found."
 
-      - name: Download compatible APK from APKPure
+      - name: Download compatible APK using multiple sources
         if: steps.release.outputs.skip != 'true'
         env:
           PACKAGE: ${{ matrix.package }}
@@ -134,21 +134,46 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p input
-          # apkeep supports APKPure but does not implement an APKMirror provider.
-          # Pin the exact version selected by Morphe's compatibility list.
-          # Explicitly acknowledge apkeep's APKPure source warning; only accept the exact pinned version.
-          apkeep -a "$PACKAGE@$VERSION" -d apk-pure -o 'acknowledge_dangers=true' input
-          # Morphe accepts APKs and split bundles directly, merging XAPK/APKM/APKS before patching.
-          PACKAGE_FILE="$(find input -type f \( -iname '*.apk' -o -iname '*.xapk' -o -iname '*.apkm' -o -iname '*.apks' \) -size +1M -print -quit)"
-          if [[ -z "$PACKAGE_FILE" ]]; then
-            echo "::error::APKPure did not provide a usable APK or split bundle for $PACKAGE@$VERSION."
-            echo "Downloaded files (if any):"
+          # Try independent apkeep providers in order. Every request is pinned
+          # to Morphe's compatible version; never silently substitute latest.
+          # APKPure is first because it already produced the working Reddit XAPK.
+          PROVIDERS=(apk-pure aptoide apkcombo)
+          FOUND=""
+          for PROVIDER in "${PROVIDERS[@]}"; do
+            echo "::group::Trying ${PROVIDER} for ${PACKAGE}@${VERSION}"
+            DEST="input/${PROVIDER}"
+            mkdir -p "$DEST"
+            if [[ "$PROVIDER" == "apk-pure" ]]; then
+              apkeep -a "$PACKAGE@$VERSION" -d "$PROVIDER" -o 'acknowledge_dangers=true' "$DEST" || true
+            else
+              apkeep -a "$PACKAGE@$VERSION" -d "$PROVIDER" "$DEST" || true
+            fi
+            CANDIDATE="$(find "$DEST" -type f \\( -iname '*.apk' -o -iname '*.xapk' -o -iname '*.apkm' -o -iname '*.apks' \\) -size +1M -print -quit)"
+            if [[ -n "$CANDIDATE" && "$CANDIDATE" == *.apk ]]; then
+              BADGING="$("$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$CANDIDATE" 2>/dev/null || true)"
+              GOT_PACKAGE="$(printf '%s\\n' "$BADGING" | sed -n "s/^package: name='\\([^']*\\)'.*/\\1/p" | head -n1)"
+              GOT_VERSION="$(printf '%s\\n' "$BADGING" | sed -n "s/^package:.* versionName='\\([^']*\\)'.*/\\1/p" | head -n1)"
+              if [[ "$GOT_PACKAGE" != "$PACKAGE" || "$GOT_VERSION" != "$VERSION" ]]; then
+                echo "Rejecting mismatched APK: package=$GOT_PACKAGE version=$GOT_VERSION"
+                CANDIDATE=""
+              fi
+            fi
+            if [[ -n "$CANDIDATE" ]]; then
+              FOUND="$CANDIDATE"
+              echo "Provider succeeded: $PROVIDER"
+              break
+            fi
+            echo "Provider did not return a usable exact-version package."
+            echo "::endgroup::"
+          done
+          if [[ -z "$FOUND" ]]; then
+            echo "::error::All APK sources failed for $PACKAGE@$VERSION (APKPure, Aptoide, APKCombo)."
             find input -type f -ls || true
             exit 1
           fi
-          echo "INPUT_APK=$PACKAGE_FILE" >> "$GITHUB_ENV"
-          echo "Selected package: $PACKAGE_FILE"
-          file "$PACKAGE_FILE"
+          echo "INPUT_APK=$FOUND" >> "$GITHUB_ENV"
+          echo "Selected package: $FOUND"
+          file "$FOUND"
 
       - name: Restore persistent signing key
         if: steps.release.outputs.skip != 'true'
