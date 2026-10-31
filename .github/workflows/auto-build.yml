@@ -95,7 +95,7 @@ jobs:
         run: |
           set -euo pipefail
           PATCH_REPO="\${PATCHES#https://github.com/}"
-          PATCH_TAG="$(gh release list --repo "$PATCH_REPO" --limit 100 --json tagName,isPrerelease --jq '[.[] | select(.isPrerelease == false) | .tagName] | sort | last')"
+          PATCH_TAG="$(gh release list --repo "$PATCH_REPO" --limit 100 --json tagName,isPrerelease,publishedAt --jq '[.[] | select(.isPrerelease == false)] | sort_by(.publishedAt) | last | .tagName')"
           if [[ -z "$PATCH_TAG" || "$PATCH_TAG" == "null" ]]; then
             echo "::error::No stable patch release found in $PATCH_REPO"
             exit 1
@@ -110,7 +110,7 @@ jobs:
             echo "New build required: $TAG"
           fi
 
-      - name: Download compatible APK (APKMirror then APKPure)
+      - name: Download compatible APK from APKPure
         if: steps.release.outputs.skip != 'true'
         env:
           PACKAGE: ${{ matrix.package }}
@@ -118,11 +118,9 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p input
-          if ! apkeep -a "$PACKAGE" -d apkmirror -o input "$VERSION"; then
-            echo "APKMirror failed; trying APKPure."
-            rm -f input/*
-            apkeep -a "$PACKAGE" -d apkpure -o input "$VERSION"
-          fi
+          # apkeep supports APKPure but does not implement an APKMirror provider.
+          # Pin the exact version selected by Morphe's compatibility list.
+          apkeep -a "$PACKAGE@$VERSION" -d apk-pure input
           APK="$(find input -type f -name '*.apk' -size +1M -print -quit)"
           if [[ -z "$APK" ]]; then
             echo "::error::No APK downloaded. Split bundles require a separate merge step."
