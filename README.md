@@ -16,7 +16,7 @@ The repository now has a second workflow: **Automatic patched APK updates** (`.g
 
 ### Download source note
 
-The current workflow uses apkeep's APKPure provider and verifies ordinary APK downloads against the expected package ID and version name. apkeep itself does not provide APKMirror, Aptoide or APKCombo integrations, so those are not falsely listed as fallback providers. The full APKMirror/APKPure/Uptodown/FlareSolverr downloader used by the reference project is still a separate integration task.
+The automatic workflow uses downloader modules from RookieEnough/Morphe-AutoBuilds at runtime, with APKMirror, APKPure, Aptoide, Uptodown, APKCombo and APKFab fallback providers. Each attempt is pinned to Morphe's exact compatible version; if all fail, the job fails safely. FlareSolverr is started as a service for Cloudflare-protected sources. The upstream GPL-3.0 project is cloned at runtime rather than copied into this repository.
 
 Morphe CLI natively accepts `.apkm`, `.xapk` and `.apks` split bundles and merges them before patching. The downloader now passes these formats directly to Morphe, alongside ordinary `.apk` files. If APKPure returns no usable package for the exact compatible version, the job fails safely rather than silently building a different version.
 
