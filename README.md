@@ -4,7 +4,7 @@ Private GitHub Actions project for personal Morphe builds.
 
 ## Automatic update builder
 
-The repository now has a second workflow: **Automatic patched APK updates** (\`.github/workflows/auto-build.yml\`).
+The repository now has a second workflow: **Automatic patched APK updates** (`.github/workflows/auto-build.yml`).
 
 - Runs every 6 hours and can also be started manually from **Actions**.
 - Checks YouTube, Reddit, Google Photos and Instagram independently.
@@ -24,16 +24,16 @@ Split APK bundles are not merged by this first automatic workflow. If a source r
 
 Keep this repository private and use your existing GitHub token in Obtainium. Create or edit one GitHub Releases source per app, all pointing to:
 
-\`https://github.com/sodalime0509/android-patch-builder/releases\`
+`https://github.com/sodalime0509/android-patch-builder/releases`
 
 Set the release tag/title filter to the matching prefix:
 
 | App | Tag filter |
 |---|---|
-| YouTube | \`^youtube-\` |
-| Reddit | \`^reddit-\` |
-| Google Photos | \`^photos-\` |
-| Instagram | \`^instagram-\` |
+| YouTube | `^youtube-` |
+| Reddit | `^reddit-` |
+| Google Photos | `^photos-` |
+| Instagram | `^instagram-` |
 
 Use the APK asset from the matching release. The APK is signed with the same keystore on every run, so updates from an earlier build of this builder retain the same signing identity. Obtainium must be configured to use release date as its version (or disable version comparison) because release tags include both app and patch versions.
 
@@ -45,10 +45,10 @@ The original **Build patched APK** workflow remains unchanged. It still accepts 
 
 The automatic workflow uses the same four repository Actions secrets already used by the manual workflow:
 
-- \`ANDROID_KEYSTORE_BASE64\`
-- \`ANDROID_KEYSTORE_PASSWORD\`
-- \`ANDROID_KEY_ALIAS\`
-- \`ANDROID_KEY_PASSWORD\`
+- `ANDROID_KEYSTORE_BASE64`
+- `ANDROID_KEYSTORE_PASSWORD`
+- `ANDROID_KEY_ALIAS`
+- `ANDROID_KEY_PASSWORD`
 
 Never commit or share the keystore or these secret values.
 
