@@ -94,13 +94,13 @@ jobs:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
           set -euo pipefail
-          PATCH_REPO="\${PATCHES#https://github.com/}"
+          PATCH_REPO="${PATCHES#https://github.com/}"
           PATCH_TAG="$(gh release list --repo "$PATCH_REPO" --limit 100 --json tagName,isPrerelease,publishedAt --jq '[.[] | select(.isPrerelease == false)] | sort_by(.publishedAt) | last | .tagName')"
           if [[ -z "$PATCH_TAG" || "$PATCH_TAG" == "null" ]]; then
             echo "::error::No stable patch release found in $PATCH_REPO"
             exit 1
           fi
-          TAG="\${APP}-v\${VERSION}-\${PATCH_TAG}"
+          TAG="${APP}-v${VERSION}-${PATCH_TAG}"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           if gh release view "$TAG" >/dev/null 2>&1; then
             echo "skip=true" >> "$GITHUB_OUTPUT"
@@ -152,7 +152,7 @@ jobs:
         run: |
           set -euo pipefail
           for value in KEYSTORE_PASSWORD KEY_ALIAS KEY_PASSWORD; do
-            if [[ -z "\${!value}" ]]; then echo "::error::Missing secret $value"; exit 1; fi
+            if [[ -z "${!value}" ]]; then echo "::error::Missing secret $value"; exit 1; fi
           done
           java -jar "$MORPHE_JAR" patch \
             --patches "$PATCHES" \
