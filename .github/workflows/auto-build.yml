@@ -236,6 +236,8 @@ jobs:
           raise SystemExit(1)
           PY
           python download_exact.py
+          INPUT_APK="$(sed -n 's/^INPUT_APK=//p' "$GITHUB_ENV" | tail -n1)"
+          test -n "$INPUT_APK"
           test -s "$INPUT_APK"
           file "$INPUT_APK"
 
