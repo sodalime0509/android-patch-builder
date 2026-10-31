@@ -169,7 +169,23 @@ jobs:
           workspace = Path.cwd()
           root = Path(os.environ["UPSTREAM_DOWNLOADER"])
           sys.path.insert(0, str(root))
-          from src import downloader
+          from src import downloader, apkpure
+
+          # Instagram's APKPure API returns multiple XAPK variants whose split
+          # APKs can have different version codes. Combining those variants
+          # creates an invalid bundle. Keep one complete, internally consistent
+          # XAPK for Instagram; retain upstream multi-variant behavior for others.
+          original_apkpure_links = apkpure.get_download_links
+          def instagram_single_variant(version, app_name, config):
+              links = original_apkpure_links(version, app_name, config)
+              if app_name == "instagram" and links:
+                  logging.info(
+                      "Instagram: selecting one complete APKPure XAPK variant "
+                      "to avoid mixing incompatible split version codes."
+                  )
+                  return links[:1]
+              return links
+          apkpure.get_download_links = instagram_single_variant
 
           # The upstream downloader resolves apps/ and downloads relative to its own repo.
           os.chdir(root)
