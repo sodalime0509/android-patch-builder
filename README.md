@@ -9,14 +9,14 @@ The repository now has a second workflow: **Automatic patched APK updates** (`.g
 - Runs every 6 hours and can also be started manually from **Actions**.
 - Checks YouTube, Reddit, Google Photos and Instagram independently.
 - Asks each configured patch source for its compatible app versions and selects the newest version returned.
-- Downloads that exact version using APKPure via apkeep.
+- Tries APKPure, Aptoide and APKCombo in sequence using apkeep, always requesting the exact compatible version.
 - Applies the latest stable patch release, signs with the existing persistent keystore and verifies the APK signature.
 - Publishes one release per app only when that app-version/patch-version combination has not already been published.
 - A failed app job does not stop the other app jobs. Failed or unverified builds are never released.
 
 ### Download source note
 
-The apkeep downloader does **not** support APKMirror. The current automated workflow therefore uses APKPure (apkeep's supported provider). APKMirror scraping/API integration is not included yet. If APKPure cannot provide the exact compatible version, that app's job fails safely rather than silently building a different version.
+The automated workflow currently tries three apkeep providers in sequence: APKPure, Aptoide and APKCombo. Each attempt is pinned to the compatible version selected by Morphe. Ordinary APK downloads are checked for the expected package ID and version name; mismatches are rejected. If all providers fail, the app job stops safely. This is a practical fallback layer, not yet the full APKMirror/Uptodown/FlareSolverr downloader used by the reference project.
 
 Morphe CLI natively accepts `.apkm`, `.xapk` and `.apks` split bundles and merges them before patching. The downloader now passes these formats directly to Morphe, alongside ordinary `.apk` files. If APKPure returns no usable package for the exact compatible version, the job fails safely rather than silently building a different version.
 
