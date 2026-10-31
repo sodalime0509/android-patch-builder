@@ -2,77 +2,71 @@
 
 Private GitHub Actions project for personal Morphe builds.
 
-## Current stage: manual APK input
+## Automatic update builder
 
-This first workflow builds one selected app when you manually provide a direct download URL for a clean APK/APKM/XAPK/APKS file. It then:
-1. Selects the configured patch repository.
-2. Prints the compatible app versions reported by that patch source.
-3. Runs Morphe Desktop CLI using that patch source.
-4. Signs with your persistent keystore.
-5. Verifies the output APK signature.
-6. Publishes a GitHub Release only after a successful build.
+The repository now has a second workflow: **Automatic patched APK updates** (\`.github/workflows/auto-build.yml\`).
 
-Apps:
-- YouTube — official Morphe patches
-- Reddit — official Morphe patches
-- Google Photos — Doom's Morphe patches
-- Instagram — HushGram
+- Runs every 6 hours and can also be started manually from **Actions**.
+- Checks YouTube, Reddit, Google Photos and Instagram independently.
+- Asks each configured patch source for its compatible app versions and selects the newest version returned.
+- Downloads that exact version using APKPure via apkeep.
+- Applies the latest stable patch release, signs with the existing persistent keystore and verifies the APK signature.
+- Publishes one release per app only when that app-version/patch-version combination has not already been published.
+- A failed app job does not stop the other app jobs. Failed or unverified builds are never released.
 
-## One-time setup: persistent signing key
+### Download source note
 
-A persistent signing key allows future builds to update the same patched app without a signing-certificate mismatch.
+The apkeep downloader does **not** support APKMirror. The current automated workflow therefore uses APKPure (apkeep's supported provider). APKMirror scraping/API integration is not included yet. If APKPure cannot provide the exact compatible version, that app's job fails safely rather than silently building a different version.
 
-Create a keystore on your computer (Java's `keytool` is included with a JDK):
+Split APK bundles are not merged by this first automatic workflow. If a source returns only a split bundle instead of a single APK, the job will fail rather than publish an incomplete package.
 
-```bash
-keytool -genkeypair -v -keystore android-patch-builder.jks -alias android-patch-builder -keyalg RSA -keysize 2048 -validity 10000
-```
+### Obtainium
 
-Remember the passwords and alias. Convert the keystore to Base64:
+Keep this repository private and use your existing GitHub token in Obtainium. Create or edit one GitHub Releases source per app, all pointing to:
 
-- Linux/macOS: `base64 -w 0 android-patch-builder.jks`
-- Windows PowerShell: `[Convert]::ToBase64String([IO.File]::ReadAllBytes("android-patch-builder.jks"))`
+\`https://github.com/sodalime0509/android-patch-builder/releases\`
 
-In this repository go to **Settings → Secrets and variables → Actions → New repository secret** and add:
+Set the release tag/title filter to the matching prefix:
 
-| Secret name | Value |
+| App | Tag filter |
 |---|---|
-| `ANDROID_KEYSTORE_BASE64` | Base64 text of your JKS file |
-| `ANDROID_KEYSTORE_PASSWORD` | Keystore password |
-| `ANDROID_KEY_ALIAS` | `android-patch-builder` (or the alias you chose) |
-| `ANDROID_KEY_PASSWORD` | Key password |
+| YouTube | \`^youtube-\` |
+| Reddit | \`^reddit-\` |
+| Google Photos | \`^photos-\` |
+| Instagram | \`^instagram-\` |
 
-Never commit the keystore or any of these values.
+Use the APK asset from the matching release. The APK is signed with the same keystore on every run, so updates from an earlier build of this builder retain the same signing identity. Obtainium must be configured to use release date as its version (or disable version comparison) because release tags include both app and patch versions.
 
-## Run a build
+## Existing manual workflow
 
-1. Open **Actions** in this repository.
-2. Select **Build patched APK**.
-3. Choose the app.
-4. Paste a **direct download URL** for the clean APK/APKM/XAPK/APKS file. A webpage URL is not a direct download.
-5. Run the workflow.
-6. Open the run log and read the **Compatible APK versions** step. Check that the APK you supplied matches a version listed there.
-7. If the workflow succeeds, download the APK from the generated **Releases** entry.
+The original **Build patched APK** workflow remains unchanged. It still accepts a manually supplied direct APK/APKM/XAPK/APKS URL.
 
-The first run will fail early if signing secrets are missing. It will not publish a release after a failed patch or failed signature verification.
+## Signing secrets
+
+The automatic workflow uses the same four repository Actions secrets already used by the manual workflow:
+
+- \`ANDROID_KEYSTORE_BASE64\`
+- \`ANDROID_KEYSTORE_PASSWORD\`
+- \`ANDROID_KEY_ALIAS\`
+- \`ANDROID_KEY_PASSWORD\`
+
+Never commit or share the keystore or these secret values.
 
 ## Patch sources
 
-- Official Morphe patches: https://github.com/MorpheApp/morphe-patches
-- Doom's Morphe patches: https://github.com/rushiranpise/morphe-patches
-- HushGram: https://github.com/SysAdminDoc/HushGram
+- YouTube and Reddit: https://github.com/MorpheApp/morphe-patches
+- Google Photos: https://github.com/rushiranpise/morphe-patches
+- Instagram: https://github.com/SysAdminDoc/HushGram
 
 Morphe Desktop CLI documentation: https://github.com/MorpheApp/morphe-desktop/blob/main/docs/documentation.md
 
-## Current limitations
+## Important limitations and safety
 
-- APK selection and download URL are manual. Automated APK version discovery and download adapters are not included yet.
-- This workflow uses the latest stable Morphe Desktop release and the selected source's latest stable patch bundle.
-- It uses patch defaults. App-specific option profiles will be added only after their current option schemas have been inspected.
-- A patch source may stop supporting an older APK version. Always compare the supplied APK's version with the compatible versions printed in the run log.
-- HushGram's published changelog currently documents specific Instagram builds and a minimum Morphe Desktop version; check its latest release notes before selecting an Instagram APK.
-- Keep this repository private. Modified third-party APKs may be subject to copyright, licence and app terms. Use the generated builds only where permitted.
-- Re-signed apps generally cannot update the Play Store-installed original in place. Back up app data before uninstalling an original app.
+- The automated workflow has been committed but must complete a successful Actions run for each app before treating that app as fully validated.
+- APKPure may lag behind the latest release or may not provide the exact compatible version. The workflow will fail closed in that case.
+- Experimental patch releases are not intentionally selected; only non-prerelease patch releases are used for release identity.
+- Re-signed apps generally cannot update the Play Store-installed original in place. The installed app must already be signed by this builder's keystore. Back up app data before changing signing identities or uninstalling an original app.
+- Modified third-party APKs may be subject to copyright, licence and app terms. Use generated builds only where permitted.
 
 ## Troubleshooting
 
