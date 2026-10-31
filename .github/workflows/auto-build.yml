@@ -138,14 +138,17 @@ jobs:
           # Pin the exact version selected by Morphe's compatibility list.
           # Explicitly acknowledge apkeep's APKPure source warning; only accept the exact pinned version.
           apkeep -a "$PACKAGE@$VERSION" -d apk-pure -o 'acknowledge_dangers=true' input
-          APK="$(find input -type f -name '*.apk' -size +1M -print -quit)"
-          if [[ -z "$APK" ]]; then
-            echo "::error::No APK downloaded. Split bundles require a separate merge step."
-            find input -type f -ls
+          # Morphe accepts APKs and split bundles directly, merging XAPK/APKM/APKS before patching.
+          PACKAGE_FILE="$(find input -type f \( -iname '*.apk' -o -iname '*.xapk' -o -iname '*.apkm' -o -iname '*.apks' \) -size +1M -print -quit)"
+          if [[ -z "$PACKAGE_FILE" ]]; then
+            echo "::error::APKPure did not provide a usable APK or split bundle for $PACKAGE@$VERSION."
+            echo "Downloaded files (if any):"
+            find input -type f -ls || true
             exit 1
           fi
-          echo "INPUT_APK=$APK" >> "$GITHUB_ENV"
-          file "$APK"
+          echo "INPUT_APK=$PACKAGE_FILE" >> "$GITHUB_ENV"
+          echo "Selected package: $PACKAGE_FILE"
+          file "$PACKAGE_FILE"
 
       - name: Restore persistent signing key
         if: steps.release.outputs.skip != 'true'
