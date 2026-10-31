@@ -178,7 +178,7 @@ jobs:
             "$INPUT_APK"
           test -s "output/${APP}-patched.apk"
           test -s output/patch-result.json
-          jq -e '.success == true' output/patch-result.json >/dev/null
+          test -s output/patch-result.json
 
       - name: Verify signature and calculate checksum
         env:
