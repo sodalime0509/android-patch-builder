@@ -13,7 +13,7 @@ on:
           - photos
           - instagram
       apk_url:
-        description: Direct download URL ending in .apk, .apkm, .xapk or .apks
+        description: Direct APK/APKM/XAPK/APKS download URL (APKMirror download.php links are accepted)
         required: true
         type: string
 
@@ -121,29 +121,45 @@ jobs:
             exit 1
           fi
 
-      - name: Download clean APK bundle
+      - name: Download and identify clean APK
         env:
           APK_URL: ${{ inputs.apk_url }}
         shell: bash
         run: |
           set -euo pipefail
-          url_path="${APK_URL%%\?*}"
-          case "$url_path" in
-            *.apk)  input_file="work/input.apk" ;;
-            *.apkm) input_file="work/input.apkm" ;;
-            *.xapk) input_file="work/input.xapk" ;;
-            *.apks) input_file="work/input.apks" ;;
-            *)
-              echo "::error::URL must end in .apk, .apkm, .xapk or .apks (query parameters are allowed)."
-              exit 1
-              ;;
-          esac
-          curl --fail --location --retry 3 --retry-all-errors --connect-timeout 30 "$APK_URL" --output "$input_file"
-          if ! file "$input_file" | grep -Eqi 'Zip archive|Android package|Java archive'; then
-            echo "::error::Downloaded file is not recognised as an APK/archive. Check that the URL is a direct download."
+          curl --fail --location --retry 3 --retry-all-errors --connect-timeout 30 \
+            --user-agent "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/126.0 Safari/537.36" \
+            "$APK_URL" --output work/download.bin
+
+          if ! file work/download.bin | grep -Eqi 'Zip archive|Android package|Java archive'; then
+            echo "::error::The download did not return an APK/archive. APKMirror may have expired the link or returned an HTML page."
+            file work/download.bin
             exit 1
           fi
+
+          if ! unzip -tq work/download.bin >/dev/null 2>&1; then
+            echo "::error::The downloaded file is not a valid APK/archive."
+            exit 1
+          fi
+
+          if unzip -Z1 work/download.bin | grep -qx 'AndroidManifest.xml'; then
+            input_file="work/input.apk"
+          else
+            url_path="${APK_URL%%\?*}"
+            case "$url_path" in
+              *.apkm) input_file="work/input.apkm" ;;
+              *.xapk) input_file="work/input.xapk" ;;
+              *.apks) input_file="work/input.apks" ;;
+              *)
+                echo "::error::Downloaded archive is not a single APK and its bundle type cannot be identified from the URL."
+                exit 1
+                ;;
+            esac
+          fi
+
+          mv work/download.bin "$input_file"
           echo "INPUT_APK=$input_file" >> "$GITHUB_ENV"
+          echo "Downloaded file identified as: $input_file"
           ls -lh "$input_file"
 
       - name: Restore persistent signing key
