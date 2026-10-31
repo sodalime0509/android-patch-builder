@@ -142,24 +142,25 @@ jobs:
             exit 1
           fi
 
-          if unzip -Z1 work/download.bin | grep -qx 'AndroidManifest.xml'; then
+          entries="$(unzip -Z1 work/download.bin)"
+          if printf '%s\n' "$entries" | grep -qx 'AndroidManifest.xml'; then
             input_file="work/input.apk"
+          elif printf '%s\n' "$entries" | grep -Eq '(^|/)toc\.pb$'; then
+            input_file="work/input.apks"
+          elif printf '%s\n' "$entries" | grep -Eq '(^|/)manifest\.json$'; then
+            input_file="work/input.xapk"
+          elif printf '%s\n' "$entries" | grep -Eq '(^|/)base\.apk$|\.apk$'; then
+            input_file="work/input.apkm"
           else
-            url_path="${APK_URL%%\?*}"
-            case "$url_path" in
-              *.apkm) input_file="work/input.apkm" ;;
-              *.xapk) input_file="work/input.xapk" ;;
-              *.apks) input_file="work/input.apks" ;;
-              *)
-                echo "::error::Downloaded archive is not a single APK and its bundle type cannot be identified from the URL."
-                exit 1
-                ;;
-            esac
+            echo "::error::Archive contents do not match a recognised APK, APKS, XAPK or APKM bundle."
+            echo "First archive entries:"
+            printf '%s\n' "$entries" | head -40
+            exit 1
           fi
 
           mv work/download.bin "$input_file"
           echo "INPUT_APK=$input_file" >> "$GITHUB_ENV"
-          echo "Downloaded file identified as: $input_file"
+          echo "Downloaded bundle identified as: $input_file"
           ls -lh "$input_file"
 
       - name: Restore persistent signing key
