@@ -137,7 +137,7 @@ jobs:
           # Try independent apkeep providers in order. Every request is pinned
           # to Morphe's compatible version; never silently substitute latest.
           # APKPure is first because it already produced the working Reddit XAPK.
-          PROVIDERS=(apk-pure aptoide apkcombo)
+          # apkeep currently exposes APKPure as its only compatible third-party source.\n          # Keep this list explicit so unsupported provider names are never tried.\n          PROVIDERS=(apk-pure)
           FOUND=""
           for PROVIDER in "${PROVIDERS[@]}"; do
             echo "::group::Trying ${PROVIDER} for ${PACKAGE}@${VERSION}"
@@ -167,7 +167,7 @@ jobs:
             echo "::endgroup::"
           done
           if [[ -z "$FOUND" ]]; then
-            echo "::error::All APK sources failed for $PACKAGE@$VERSION (APKPure, Aptoide, APKCombo)."
+            echo "::error::APKPure did not return a usable exact-version package for $PACKAGE@$VERSION."
             find input -type f -ls || true
             exit 1
           fi
