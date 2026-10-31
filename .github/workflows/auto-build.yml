@@ -166,9 +166,13 @@ jobs:
           from pathlib import Path
 
           logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+          workspace = Path.cwd()
           root = Path(os.environ["UPSTREAM_DOWNLOADER"])
           sys.path.insert(0, str(root))
           from src import downloader
+
+          # The upstream downloader resolves apps/ and downloads relative to its own repo.
+          os.chdir(root)
 
           app = os.environ["APP"]
           package = os.environ["PACKAGE"]
@@ -213,12 +217,12 @@ jobs:
                       # The override_version path pins every provider to this exact version.
                       if resolved != version:
                           raise RuntimeError(f"Provider returned {resolved!r}, expected {version!r}")
-                      target = Path("input") / f"{app}-{version}{result.suffix.lower()}"
+                      target = workspace / "input" / f"{app}-{version}{result.suffix.lower()}"
                       result.replace(target)
                       print(f"Downloaded exact version from {provider}: {target}")
                       print(f"INPUT_APK={target.resolve()}")
                       with open(os.environ["GITHUB_ENV"], "a") as env:
-                          env.write(f"INPUT_APK={target.resolve()}\\n")
+                          env.write(f"INPUT_APK={target.resolve()}\n")
                       raise SystemExit(0)
                   failures.append(f"{provider}: no valid file")
               except SystemExit:
