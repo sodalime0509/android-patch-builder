@@ -7,16 +7,16 @@ Private GitHub Actions project for personal Morphe builds.
 The repository now has a second workflow: **Automatic patched APK updates** (`.github/workflows/auto-build.yml`).
 
 - Runs every 6 hours and can also be started manually from **Actions**.
-- Checks YouTube, Reddit, Google Photos and Instagram independently.
+- Checks YouTube, Reddit, Google Photos, Instagram and Gboard independently.
 - Asks each configured patch source for its compatible app versions and selects the newest version returned.
 - Downloads the exact compatible version using apkeep's APKPure provider.
 - Applies the latest stable patch release, signs with the existing persistent keystore and verifies the APK signature.
-- Publishes one release per app only when that app-version/patch-version combination has not already been published.
+- Rebuilds all five apps when any app or patch source changes, then publishes all five APKs together in one combined release. If nothing changes, it skips the build.
 - A failed app job does not stop the other app jobs. Failed or unverified builds are never released.
 
 ### Download source note
 
-The automatic workflow uses downloader modules from RookieEnough/Morphe-AutoBuilds at runtime, with APKMirror, APKPure, Aptoide, Uptodown, APKCombo and APKFab fallback providers. Each attempt is pinned to Morphe's exact compatible version; if all fail, the job fails safely. FlareSolverr is started as a service for Cloudflare-protected sources. The upstream GPL-3.0 project is cloned at runtime rather than copied into this repository.
+The automatic workflow uses downloader modules from RookieEnough/Morphe-AutoBuilds at runtime, with APKMirror, APKPure, Aptoide, Uptodown, APKCombo and APKFab fallback providers. Gboard is downloaded as an arm64 bundle, matching the architecture supported by Jason Wu's current patch source. Each attempt is pinned to Morphe's exact compatible version; if all fail, the job fails safely. FlareSolverr is started as a service for Cloudflare-protected sources. The upstream GPL-3.0 project is cloned at runtime rather than copied into this repository.
 
 Morphe CLI natively accepts `.apkm`, `.xapk` and `.apks` split bundles and merges them before patching. The downloader now passes these formats directly to Morphe, alongside ordinary `.apk` files. If APKPure returns no usable package for the exact compatible version, the job fails safely rather than silently building a different version.
 
@@ -34,6 +34,7 @@ Set the release tag/title filter to the matching prefix:
 | Reddit | `^reddit-` |
 | Google Photos | `^photos-` |
 | Instagram | `^instagram-` |
+| Gboard | `^gboard-` |
 
 Use the APK asset from the matching release. The APK is signed with the same keystore on every run, so updates from an earlier build of this builder retain the same signing identity. Obtainium must be configured to use release date as its version (or disable version comparison) because release tags include both app and patch versions.
 
@@ -57,6 +58,7 @@ Never commit or share the keystore or these secret values.
 - YouTube and Reddit: https://github.com/MorpheApp/morphe-patches
 - Google Photos: https://github.com/rushiranpise/morphe-patches
 - Instagram: https://github.com/SysAdminDoc/HushGram
+- Gboard: https://github.com/jasonwu1994/Gboard-patches
 
 For Instagram, the automatic workflow also checks HushGram's published patch list before building. It stops if a patch description appears to add Instagram Plus, premium-feature unlocking, or subscription bypass functionality. Ordinary HushGram patches (privacy, ads, interface, downloads and playback) remain available. This is a fail-closed keyword guard, not a manual review of every upstream code change.
 
