@@ -44,7 +44,8 @@ jobs:
             "youtube": {"package":"com.google.android.youtube","repo":"https://github.com/MorpheApp/morphe-patches"},
             "reddit": {"package":"com.reddit.frontpage","repo":"https://github.com/MorpheApp/morphe-patches"},
             "photos": {"package":"com.google.android.apps.photos","repo":"https://github.com/rushiranpise/morphe-patches"},
-            "instagram": {"package":"com.instagram.android","repo":"https://github.com/SysAdminDoc/HushGram"}
+            "instagram": {"package":"com.instagram.android","repo":"https://github.com/SysAdminDoc/HushGram"},
+            "gboard": {"package":"com.google.android.inputmethod.latin","repo":"https://github.com/jasonwu1994/Gboard-patches"}
           }
           JSON
 
@@ -73,7 +74,7 @@ jobs:
 
           BUILD=false
           MANIFEST='{}'
-          for app in youtube reddit photos instagram; do
+          for app in youtube reddit photos instagram gboard; do
             new_version="$(jq -r --arg a "$app" '.[$a].app_version' desired.json)"
             new_tag="$(jq -r --arg a "$app" '.[$a].patch_tag' desired.json)"
             old_version="$(jq -r --arg a "$app" '.[$a].app_version // empty' old-manifest.json)"
@@ -122,6 +123,8 @@ jobs:
             package: com.google.android.apps.photos
           - name: instagram
             package: com.instagram.android
+          - name: gboard
+            package: com.google.android.inputmethod.latin
 
     steps:
       - uses: actions/checkout@v4
@@ -224,7 +227,8 @@ jobs:
             "youtube":{"org":"google-inc","name":"youtube","type":"APK","arch":"universal","dpi":"nodpi","package":package,"version":""},
             "reddit":{"org":"redditinc","name":"reddit","type":"BUNDLE","arch":"universal","dpi":"120-640dpi","package":package,"version":""},
             "photos":{"org":"google-inc","name":"photos","type":"BUNDLE","arch":"universal","dpi":"120-640dpi","package":package,"version":""},
-            "instagram":{"org":"instagram","name":"instagram-instagram","type":"BUNDLE","arch":"universal","dpi":"120-640dpi","package":package,"version":""}
+            "instagram":{"org":"instagram","name":"instagram-instagram","type":"BUNDLE","arch":"universal","dpi":"120-640dpi","package":package,"version":""},
+            "gboard":{"org":"google-inc","name":"gboard","type":"BUNDLE","arch":"arm64-v8a","dpi":"nodpi","package":package,"version":""}
           }
           if app not in configs or configs[app]["package"] != package:
               raise SystemExit(f"Unknown app/package mapping: {app}/{package}")
