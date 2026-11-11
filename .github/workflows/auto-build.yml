@@ -186,7 +186,7 @@ jobs:
         run: |
           set -euo pipefail
           curl --fail --silent --show-error --location https://raw.githubusercontent.com/SysAdminDoc/HushGram/main/patches-list.json -o hushgram-patches.json
-          jq -r '[.patches[] | select((.name + " " + .description) | test("instagram[ -]?plus|unlock[^.]{0,50}(premium|paid|subscription)|premium[^.]{0,50}(feature|subscription)|subscription[^.]{0,50}(bypass|unlock)"; "i"))] | .[].name' hushgram-patches.json > blocked-instagram-patches.txt
+          jq -r '[.patches[] | select((.name + " " + .description) | test("(unlock|enable|bypass|remove)[^.]{0,80}(paid|premium|subscription)[^.]{0,40}(feature|limit|check|payment|billing)?|((paid|premium|subscription)[^.]{0,60}(unlock|bypass|crack))"; "i"))] | .[].name' hushgram-patches.json > blocked-instagram-patches.txt
           if [[ -s blocked-instagram-patches.txt ]]; then
             echo "::error::HushGram contains possible paid-feature unlock patches."
             cat blocked-instagram-patches.txt
